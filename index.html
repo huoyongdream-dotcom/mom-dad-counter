@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>爸爸妈妈计数器</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', sans-serif; background: #f5f5f0; min-height: 100vh; }
+  .wrap { padding: 1.5rem 1rem; max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 18px; font-weight: 500; color: #1a1a1a; margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center; }
+  .daily-toggle { font-size: 12px; color: #666; background: #fff; border: 0.5px solid #ddd; border-radius: 20px; padding: 4px 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+  .daily-toggle.on { background: #e6f1fb; color: #185FA5; border-color: #b5d4f4; }
+  .status-bar { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #666; margin-bottom: 1.5rem; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
+  .dot.listening { background: #4CAF50; animation: pulse 1.2s infinite; }
+  .dot.error { background: #e24b4a; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .counters { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1.5rem; }
+  .counter-card { background: #fff; border-radius: 12px; padding: 1.25rem; text-align: center; border: 0.5px solid #e0e0d8; }
+  .counter-label { font-size: 13px; color: #888; margin-bottom: 8px; }
+  .counter-num { font-size: 52px; font-weight: 500; line-height: 1; }
+  .counter-num.baba { color: #185FA5; }
+  .counter-num.mama { color: #993556; }
+  .total-card { background: #fff; border-radius: 12px; padding: 1rem 1.25rem; display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border: 0.5px solid #e0e0d8; }
+  .total-label { font-size: 14px; color: #666; }
+  .total-num { font-size: 28px; font-weight: 500; color: #1a1a1a; }
+  .btns { display: flex; gap: 10px; margin-bottom: 1rem; }
+  .btns button { flex: 1; padding: 11px; border-radius: 8px; border: 0.5px solid #ddd; background: #fff; font-size: 14px; cursor: pointer; color: #1a1a1a; }
+  .btns button:active { transform: scale(0.97); }
+  .btn-start { background: #e6f1fb !important; color: #185FA5 !important; border-color: #b5d4f4 !important; font-weight: 500; }
+  .btn-stop { background: #fcebeb !important; color: #a32d2d !important; border-color: #f7c1c1 !important; font-weight: 500; }
+  .section-label { font-size: 12px; color: #aaa; margin-bottom: 8px; }
+  .manual-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1.5rem; }
+  .manual-btns button { padding: 14px; border-radius: 8px; border: 0.5px solid #ddd; background: #fff; font-size: 16px; cursor: pointer; font-weight: 500; }
+  .manual-btns .m-baba { color: #185FA5; }
+  .manual-btns .m-mama { color: #993556; }
+  .log { border: 0.5px solid #e0e0d8; border-radius: 12px; background: #fff; }
+  .log-title { font-size: 13px; color: #888; padding: 10px 14px; border-bottom: 0.5px solid #e0e0d8; display: flex; justify-content: space-between; align-items: center; }
+  .log-title button { font-size: 11px; border: 0.5px solid #ddd; background: none; border-radius: 4px; padding: 3px 10px; cursor: pointer; color: #666; }
+  .log-empty { font-size: 13px; color: #bbb; text-align: center; padding: 1.5rem; }
+  .log-body { max-height: 220px; overflow-y: auto; }
+  .log-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 0.5px solid #f0f0e8; font-size: 13px; }
+  .log-item:last-child { border-bottom: none; }
+  .log-item .word { font-weight: 500; }
+  .log-item .word.baba { color: #185FA5; }
+  .log-item .word.mama { color: #993556; }
+  .log-item .time { color: #aaa; font-size: 12px; }
+  .tip { font-size: 12px; color: #aaa; margin-top: 1rem; line-height: 1.7; background: #fff; border-radius: 8px; padding: 10px 14px; border: 0.5px solid #e0e0d8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>
+    爸爸妈妈计数器 👶
+    <span class="daily-toggle" id="daily-toggle" onclick="toggleDailyReset()">🌙 每日重置</span>
+  </h1>
+
+  <div class="status-bar">
+    <div class="dot" id="dot"></div>
+    <span id="status-text">点击「开始监听」后自动识别</span>
+  </div>
+
+  <div class="counters">
+    <div class="counter-card">
+      <div class="counter-label">爸爸</div>
+      <div class="counter-num baba" id="cnt-baba">0</div>
+    </div>
+    <div class="counter-card">
+      <div class="counter-label">妈妈</div>
+      <div class="counter-num mama" id="cnt-mama">0</div>
+    </div>
+  </div>
+
+  <div class="total-card">
+    <span class="total-label">今天合计</span>
+    <span class="total-num" id="cnt-total">0</span>
+  </div>
+
+  <div class="btns">
+    <button class="btn-start" id="btn-start" onclick="startListening()">🎙 开始监听</button>
+    <button class="btn-stop" id="btn-stop" onclick="stopListening()" style="display:none">⏸ 暂停</button>
+    <button onclick="resetAll()">↺ 重置</button>
+  </div>
+
+  <div class="section-label">手动补记（万一漏掉）</div>
+  <div class="manual-btns">
+    <button class="m-baba" onclick="manualAdd('爸爸')">＋ 爸爸</button>
+    <button class="m-mama" onclick="manualAdd('妈妈')">＋ 妈妈</button>
+  </div>
+
+  <div class="log">
+    <div class="log-title">
+      <span>记录明细</span>
+      <button onclick="exportLog()">↓ 导出 CSV</button>
+    </div>
+    <div class="log-body" id="log-body">
+      <div class="log-empty">暂无记录</div>
+    </div>
+  </div>
+
+  <div class="tip" id="tip-text">
+    💡 开始监听后会自动保持屏幕常亮，无需手动修改系统锁屏设置。<br>
+    ✅ 本文件需要用 HTTPS 方式打开（推荐 GitHub Pages），添加到主屏幕体验最佳。
+  </div>
+</div>
+
+<script>
+// ---------- 核心数据 ----------
+let babaCnt = 0, mamaCnt = 0;
+let logs = [];
+let recog = null;
+let running = false;
+let restartTimer = null;
+let dailyResetEnabled = false;
+
+// 冷却期记录（避免同一词连续触发）
+let lastDetectTime = {};
+const COOLDOWN_MS = 2000; // 2秒内不重复计数
+
+// 白名单：覆盖孩子口齿不清时的常见识别结果
+const BABA_WORDS = ['爸', '爸爸', '粑粑', '拔拔', '叭叭', '霸霸'];
+const MAMA_WORDS = ['妈', '妈妈', '麻麻', '马马', '骂骂', '吗吗'];
+
+// 重试退避参数
+let failCount = 0;
+const BASE_RESTART_DELAY = 300;
+
+// 屏幕常亮控制
+let wakeLock = null;
+
+// ---------- UI 更新 ----------
+function updateUI() {
+  document.getElementById('cnt-baba').textContent = babaCnt;
+  document.getElementById('cnt-mama').textContent = mamaCnt;
+  document.getElementById('cnt-total').textContent = babaCnt + mamaCnt;
+}
+
+function addLog(word, source) {
+  const now = new Date();
+  const t = now.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  logs.unshift({word, time: t, source});
+  renderLog();
+}
+
+function renderLog() {
+  const body = document.getElementById('log-body');
+  if (logs.length === 0) { body.innerHTML = '<div class="log-empty">暂无记录</div>'; return; }
+  body.innerHTML = logs.slice(0,200).map(l => {
+    const cls = l.word.includes('爸') ? 'baba' : 'mama';
+    const src = l.source === 'manual' ? ' <span style="font-size:10px;color:#bbb">[手动]</span>' : '';
+    return `<div class="log-item"><span class="word ${cls}">${l.word}${src}</span><span class="time">${l.time}</span></div>`;
+  }).join('');
+}
+
+// ---------- 手动添加 ----------
+function manualAdd(word) {
+  if (word === '爸爸') babaCnt++; else mamaCnt++;
+  updateUI();
+  addLog(word, 'manual');
+}
+
+// ---------- 自动识别到的词（带冷却期）----------
+function detected(word) {
+  const now = Date.now();
+  if (lastDetectTime[word] && (now - lastDetectTime[word] < COOLDOWN_MS)) return;
+  lastDetectTime[word] = now;
+
+  if (word.includes('爸')) babaCnt++;
+  else mamaCnt++;
+  updateUI();
+  addLog(word, 'auto');
+}
+
+// ---------- 屏幕常亮控制 ----------
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      console.log('屏幕常亮已激活');
+    }
+  } catch (err) {
+    console.error(`唤醒锁失败: ${err.name}, ${err.message}`);
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock !== null) {
+    wakeLock.release().then(() => {
+      wakeLock = null;
+      console.log('屏幕常亮已释放');
+    });
+  }
+}
+
+// 监听页面可见性变化，重新激活唤醒锁
+document.addEventListener('visibilitychange', () => {
+  if (running && document.visibilityState === 'visible') {
+    requestWakeLock();
+  }
+});
+
+// ---------- 语音识别核心 ----------
+function setStatus(text, state) {
+  document.getElementById('status-text').textContent = text;
+  const dot = document.getElementById('dot');
+  dot.className = 'dot' + (state ? ' ' + state : '');
+}
+
+function startListening() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    setStatus('此浏览器不支持语音识别，请用 Chrome 或 Safari', 'error');
+    return;
+  }
+  running = true;
+  document.getElementById('btn-start').style.display = 'none';
+  document.getElementById('btn-stop').style.display = '';
+  failCount = 0;
+  requestWakeLock();
+  startRecog();
+}
+
+function startRecog() {
+  if (!running) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recog = new SR();
+  recog.lang = 'zh-CN';
+  recog.continuous = true;
+  recog.interimResults = true;
+  recog.maxAlternatives = 3;
+
+  let lastProcessed = '';
+
+  recog.onstart = () => setStatus('正在监听中…', 'listening');
+  recog.onerror = (e) => {
+    if (e.error === 'no-speech') {
+      failCount++;
+      const delay = Math.min(BASE_RESTART_DELAY * Math.pow(2, failCount), 10000);
+      if (running) setTimeout(startRecog, delay);
+      return;
+    }
+    if (e.error === 'not-allowed') {
+      setStatus('麦克风权限被拒绝，请在浏览器设置里手动开启', 'error');
+      running = false;
+      releaseWakeLock();
+      document.getElementById('btn-start').style.display = '';
+      document.getElementById('btn-stop').style.display = 'none';
+      return;
+    }
+    setStatus('识别出错: ' + e.error, 'error');
+  };
+  recog.onend = () => {
+    if (running) {
+      failCount++;
+      const delay = Math.min(BASE_RESTART_DELAY * Math.pow(2, failCount), 10000);
+      setTimeout(startRecog, delay);
+    }
+  };
+
+  recog.onresult = (e) => {
+    failCount = 0;
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const result = e.results[i];
+      const transcript = result[0].transcript;
+      if (result.isFinal) {
+        lastProcessed = '';
+        processText(transcript);
+      } else {
+        const diff = transcript.replace(lastProcessed, '');
+        if (diff && containsTargetWord(diff)) {
+          processText(diff);
+          lastProcessed = transcript;
+        }
+      }
+    }
+  };
+
+  try { recog.start(); } catch(e) {}
+}
+
+function containsTargetWord(text) {
+  return BABA_WORDS.some(w => text.includes(w)) || MAMA_WORDS.some(w => text.includes(w));
+}
+
+function processText(text) {
+  const chars = text.split('');
+  let i = 0;
+  while (i < chars.length) {
+    const twoChar = chars.slice(i, i+2).join('');
+    if (BABA_WORDS.includes(twoChar)) {
+      detected('爸爸');
+      i += 2;
+      continue;
+    }
+    if (MAMA_WORDS.includes(twoChar)) {
+      detected('妈妈');
+      i += 2;
+      continue;
+    }
+    const oneChar = chars[i];
+    if (BABA_WORDS.includes(oneChar)) {
+      detected('爸爸');
+      i++;
+      continue;
+    }
+    if (MAMA_WORDS.includes(oneChar)) {
+      detected('妈妈');
+      i++;
+      continue;
+    }
+    i++;
+  }
+}
+
+function stopListening() {
+  running = false;
+  if (recog) { try { recog.stop(); } catch(e){} recog = null; }
+  clearTimeout(restartTimer);
+  releaseWakeLock();
+  setStatus('已暂停', '');
+  document.getElementById('btn-start').style.display = '';
+  document.getElementById('btn-stop').style.display = 'none';
+}
+
+function resetAll() {
+  if (running) stopListening();
+  babaCnt = 0; mamaCnt = 0; logs = [];
+  updateUI(); renderLog();
+  setStatus('已重置，点击「开始监听」重新开始', '');
+}
+
+// ---------- 每日自动重置 ----------
+function toggleDailyReset() {
+  dailyResetEnabled = !dailyResetEnabled;
+  const btn = document.getElementById('daily-toggle');
+  if (dailyResetEnabled) {
+    btn.classList.add('on');
+    btn.innerHTML = '🌙 每日重置 (开)';
+    scheduleDailyReset();
+  } else {
+    btn.classList.remove('on');
+    btn.innerHTML = '🌙 每日重置';
+    if (window._dailyResetTimer) clearTimeout(window._dailyResetTimer);
+  }
+}
+
+function scheduleDailyReset() {
+  if (!dailyResetEnabled) return;
+  const now = new Date();
+  const midnight = new Date(now);
+  midnight.setHours(24, 0, 0, 0);
+  const msToMidnight = midnight - now;
+  window._dailyResetTimer = setTimeout(() => {
+    exportLog('昨日记录');
+    resetAll();
+    scheduleDailyReset();
+  }, msToMidnight);
+}
+
+// ---------- 导出 CSV ----------
+function exportLog(prefix = '') {
+  const filename = (prefix || '爸爸妈妈计数') + '_' + new Date().toLocaleDateString('zh-CN').replace(/\//g,'-') + '.csv';
+  const lines = ['时间,词语,方式'];
+  logs.forEach(l => lines.push(`${l.time},${l.word},${l.source === 'manual' ? '手动' : '自动'}`));
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
