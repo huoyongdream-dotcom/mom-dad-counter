@@ -38,6 +38,25 @@
   .manual-btns button { padding: 14px; border-radius: 8px; border: 0.5px solid #ddd; background: #fff; font-size: 16px; cursor: pointer; font-weight: 500; }
   .manual-btns .m-baba { color: #185FA5; }
   .manual-btns .m-mama { color: #993556; }
+
+  /* 图表卡片 */
+  .chart-card { background: #fff; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; border: 0.5px solid #e0e0d8; }
+  .chart-title { font-size: 13px; color: #888; margin-bottom: 12px; }
+  .chart-legend { display: flex; gap: 12px; margin-bottom: 12px; font-size: 12px; }
+  .chart-legend span { display: flex; align-items: center; gap: 4px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .legend-dot.baba { background: #185FA5; }
+  .legend-dot.mama { background: #993556; }
+  .chart-bars { display: flex; align-items: flex-end; gap: 8px; height: 120px; }
+  .bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+  .bar-pair { display: flex; gap: 2px; align-items: flex-end; width: 100%; justify-content: center; }
+  .bar { width: 12px; border-radius: 3px 3px 0 0; transition: height 0.3s; }
+  .bar.baba { background: #185FA5; }
+  .bar.mama { background: #993556; }
+  .bar-label { font-size: 10px; color: #aaa; margin-top: 4px; }
+  .bar-value { font-size: 10px; color: #666; margin-bottom: 2px; }
+  .chart-empty { font-size: 12px; color: #bbb; text-align: center; padding: 1rem; }
+
   .log { border: 0.5px solid #e0e0d8; border-radius: 12px; background: #fff; }
   .log-title { font-size: 13px; color: #888; padding: 10px 14px; border-bottom: 0.5px solid #e0e0d8; display: flex; justify-content: space-between; align-items: center; }
   .log-title button { font-size: 11px; border: 0.5px solid #ddd; background: none; border-radius: 4px; padding: 3px 10px; cursor: pointer; color: #666; }
@@ -92,6 +111,18 @@
     <button class="m-mama" onclick="manualAdd('妈妈')">＋ 妈妈</button>
   </div>
 
+  <!-- 每日统计柱状图 -->
+  <div class="chart-card">
+    <div class="chart-title">📊 近7天统计</div>
+    <div class="chart-legend">
+      <span><span class="legend-dot baba"></span> 爸爸</span>
+      <span><span class="legend-dot mama"></span> 妈妈</span>
+    </div>
+    <div class="chart-bars" id="chart-bars">
+      <div class="chart-empty">暂无数据</div>
+    </div>
+  </div>
+
   <div class="log">
     <div class="log-title">
       <span>记录明细</span>
@@ -103,8 +134,8 @@
   </div>
 
   <div class="tip" id="tip-text">
-    💡 开始监听后会自动保持屏幕常亮，无需手动修改系统锁屏设置。<br>
-    ✅ 本文件需要用 HTTPS 方式打开（推荐 GitHub Pages），添加到主屏幕体验最佳。
+    💡 开始监听后会自动保持屏幕常亮。<br>
+    ✅ 数据自动保存，关掉页面也不会丢失。隔天打开会自动归档昨日数据。
   </div>
 </div>
 
@@ -117,26 +148,87 @@ let running = false;
 let restartTimer = null;
 let dailyResetEnabled = false;
 
-// 冷却期记录（避免同一词连续触发）
+// 冷却期、白名单等
 let lastDetectTime = {};
-const COOLDOWN_MS = 2000; // 2秒内不重复计数
-
-// 白名单：覆盖孩子口齿不清时的常见识别结果
+const COOLDOWN_MS = 2000;
 const BABA_WORDS = ['爸', '爸爸', '粑粑', '拔拔', '叭叭', '霸霸'];
 const MAMA_WORDS = ['妈', '妈妈', '麻麻', '马马', '骂骂', '吗吗'];
 
-// 重试退避参数
 let failCount = 0;
 const BASE_RESTART_DELAY = 300;
 
-// 屏幕常亮控制
 let wakeLock = null;
+
+// 历史每日统计 (存储格式: { "YYYY-MM-DD": {baba: n, mama: n} })
+let dailyHistory = {};
+
+// ---------- 本地存储管理 ----------
+const STORAGE_KEY = 'momdad_counter_data';
+
+function getTodayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+function saveData() {
+  const data = {
+    date: getTodayStr(),
+    babaCnt,
+    mamaCnt,
+    logs,
+    dailyResetEnabled,
+    dailyHistory
+  };
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch(e) {}
+}
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    const today = getTodayStr();
+    
+    // 恢复每日重置开关状态
+    dailyResetEnabled = data.dailyResetEnabled || false;
+    
+    // 检查日期：如果已开启每日重置且存储的日期不是今天，则归档昨日数据并清零
+    if (dailyResetEnabled && data.date && data.date !== today) {
+      // 将昨日数据保存到历史
+      if (data.babaCnt > 0 || data.mamaCnt > 0) {
+        const hist = data.dailyHistory || {};
+        hist[data.date] = { baba: data.babaCnt, mama: data.mamaCnt };
+        dailyHistory = hist;
+      } else {
+        dailyHistory = data.dailyHistory || {};
+      }
+      // 重置今天数据
+      babaCnt = 0; mamaCnt = 0; logs = [];
+    } else {
+      // 同一天，恢复数据
+      babaCnt = data.babaCnt || 0;
+      mamaCnt = data.mamaCnt || 0;
+      logs = data.logs || [];
+      dailyHistory = data.dailyHistory || {};
+    }
+  } catch(e) {}
+}
+
+// 保存当前今日数据到历史 (在重置或午夜时调用)
+function archiveToday() {
+  if (babaCnt === 0 && mamaCnt === 0) return;
+  const today = getTodayStr();
+  dailyHistory[today] = { baba: babaCnt, mama: mamaCnt };
+}
 
 // ---------- UI 更新 ----------
 function updateUI() {
   document.getElementById('cnt-baba').textContent = babaCnt;
   document.getElementById('cnt-mama').textContent = mamaCnt;
   document.getElementById('cnt-total').textContent = babaCnt + mamaCnt;
+  saveData();
 }
 
 function addLog(word, source) {
@@ -144,6 +236,7 @@ function addLog(word, source) {
   const t = now.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
   logs.unshift({word, time: t, source});
   renderLog();
+  saveData();
 }
 
 function renderLog() {
@@ -156,10 +249,59 @@ function renderLog() {
   }).join('');
 }
 
+// ---------- 图表渲染 ----------
+function renderChart() {
+  const container = document.getElementById('chart-bars');
+  // 获取最近7天（包括今天）
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    const val = dailyHistory[key] || { baba: 0, mama: 0 };
+    // 如果是今天，用当前内存中的数据覆盖历史数据（更实时）
+    if (key === getTodayStr()) {
+      val.baba = babaCnt;
+      val.mama = mamaCnt;
+    }
+    days.push({ label: key.slice(5), baba: val.baba, mama: val.mama });
+  }
+  
+  // 找出最大值，用于比例
+  const maxVal = Math.max(1, ...days.map(d => d.baba + d.mama));
+  
+  if (maxVal === 0) {
+    container.innerHTML = '<div class="chart-empty">暂无数据</div>';
+    return;
+  }
+  
+  let html = '';
+  days.forEach(day => {
+    const bHeight = (day.baba / maxVal * 100).toFixed(1);
+    const mHeight = (day.mama / maxVal * 100).toFixed(1);
+    html += `
+      <div class="bar-group">
+        <div class="bar-value">${day.baba + day.mama}</div>
+        <div class="bar-pair">
+          <div class="bar baba" style="height:${bHeight}%"></div>
+          <div class="bar mama" style="height:${mHeight}%"></div>
+        </div>
+        <div class="bar-label">${day.label}</div>
+      </div>`;
+  });
+  container.innerHTML = html;
+}
+
+// 数据变动时更新图表
+function updateAll() {
+  updateUI();
+  renderChart();
+}
+
 // ---------- 手动添加 ----------
 function manualAdd(word) {
   if (word === '爸爸') babaCnt++; else mamaCnt++;
-  updateUI();
+  updateAll();
   addLog(word, 'manual');
 }
 
@@ -171,7 +313,7 @@ function detected(word) {
 
   if (word.includes('爸')) babaCnt++;
   else mamaCnt++;
-  updateUI();
+  updateAll();
   addLog(word, 'auto');
 }
 
@@ -180,23 +322,16 @@ async function requestWakeLock() {
   try {
     if ('wakeLock' in navigator) {
       wakeLock = await navigator.wakeLock.request('screen');
-      console.log('屏幕常亮已激活');
     }
-  } catch (err) {
-    console.error(`唤醒锁失败: ${err.name}, ${err.message}`);
-  }
+  } catch (err) {}
 }
 
 function releaseWakeLock() {
   if (wakeLock !== null) {
-    wakeLock.release().then(() => {
-      wakeLock = null;
-      console.log('屏幕常亮已释放');
-    });
+    wakeLock.release().then(() => { wakeLock = null; });
   }
 }
 
-// 监听页面可见性变化，重新激活唤醒锁
 document.addEventListener('visibilitychange', () => {
   if (running && document.visibilityState === 'visible') {
     requestWakeLock();
@@ -326,10 +461,14 @@ function stopListening() {
   document.getElementById('btn-stop').style.display = 'none';
 }
 
+// 重置（手动重置，保留历史）
 function resetAll() {
   if (running) stopListening();
+  // 归档今日数据（如果有）
+  archiveToday();
   babaCnt = 0; mamaCnt = 0; logs = [];
-  updateUI(); renderLog();
+  updateAll();
+  saveData();
   setStatus('已重置，点击「开始监听」重新开始', '');
 }
 
@@ -346,6 +485,7 @@ function toggleDailyReset() {
     btn.innerHTML = '🌙 每日重置';
     if (window._dailyResetTimer) clearTimeout(window._dailyResetTimer);
   }
+  saveData(); // 保存开关状态
 }
 
 function scheduleDailyReset() {
@@ -355,9 +495,13 @@ function scheduleDailyReset() {
   midnight.setHours(24, 0, 0, 0);
   const msToMidnight = midnight - now;
   window._dailyResetTimer = setTimeout(() => {
-    exportLog('昨日记录');
-    resetAll();
-    scheduleDailyReset();
+    // 先导出昨天记录（可选）
+    // 归档并重置
+    archiveToday();
+    babaCnt = 0; mamaCnt = 0; logs = [];
+    updateAll();
+    saveData();
+    scheduleDailyReset(); // 安排下一次
   }, msToMidnight);
 }
 
@@ -374,6 +518,25 @@ function exportLog(prefix = '') {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+// ---------- 初始化 ----------
+window.onload = () => {
+  loadData();
+  // 更新界面
+  updateAll();
+  renderLog();
+  // 每日重置开关状态
+  const btn = document.getElementById('daily-toggle');
+  if (dailyResetEnabled) {
+    btn.classList.add('on');
+    btn.innerHTML = '🌙 每日重置 (开)';
+    scheduleDailyReset();
+  } else {
+    btn.classList.remove('on');
+    btn.innerHTML = '🌙 每日重置';
+  }
+  setStatus('点击「开始监听」后自动识别', '');
+};
 </script>
 </body>
 </html>
