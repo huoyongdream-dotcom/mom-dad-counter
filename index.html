@@ -38,8 +38,6 @@
   .manual-btns button { padding: 14px; border-radius: 8px; border: 0.5px solid #ddd; background: #fff; font-size: 16px; cursor: pointer; font-weight: 500; }
   .manual-btns .m-baba { color: #185FA5; }
   .manual-btns .m-mama { color: #993556; }
-
-  /* 图表卡片 */
   .chart-card { background: #fff; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; border: 0.5px solid #e0e0d8; }
   .chart-title { font-size: 13px; color: #888; margin-bottom: 12px; }
   .chart-legend { display: flex; gap: 12px; margin-bottom: 12px; font-size: 12px; }
@@ -56,7 +54,6 @@
   .bar-label { font-size: 10px; color: #aaa; margin-top: 4px; }
   .bar-value { font-size: 10px; color: #666; margin-bottom: 2px; }
   .chart-empty { font-size: 12px; color: #bbb; text-align: center; padding: 1rem; }
-
   .log { border: 0.5px solid #e0e0d8; border-radius: 12px; background: #fff; }
   .log-title { font-size: 13px; color: #888; padding: 10px 14px; border-bottom: 0.5px solid #e0e0d8; display: flex; justify-content: space-between; align-items: center; }
   .log-title button { font-size: 11px; border: 0.5px solid #ddd; background: none; border-radius: 4px; padding: 3px 10px; cursor: pointer; color: #666; }
@@ -111,7 +108,6 @@
     <button class="m-mama" onclick="manualAdd('妈妈')">＋ 妈妈</button>
   </div>
 
-  <!-- 每日统计柱状图 -->
   <div class="chart-card">
     <div class="chart-title">📊 近7天统计</div>
     <div class="chart-legend">
@@ -135,34 +131,33 @@
 
   <div class="tip" id="tip-text">
     💡 开始监听后会自动保持屏幕常亮。<br>
-    ✅ 数据自动保存，关掉页面也不会丢失。隔天打开会自动归档昨日数据。
+    ✅ 使用你训练的专属模型，离线识别更懂孩子的声音。
   </div>
 </div>
+
+<!-- 引入 TensorFlow.js 和 speech-commands -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@0.5.4/dist/speech-commands.min.js"></script>
 
 <script>
 // ---------- 核心数据 ----------
 let babaCnt = 0, mamaCnt = 0;
 let logs = [];
-let recog = null;
 let running = false;
-let restartTimer = null;
 let dailyResetEnabled = false;
 
-// 冷却期、白名单等
+// 冷却期记录（已调为 1000 毫秒）
 let lastDetectTime = {};
-const COOLDOWN_MS = 2000;
-const BABA_WORDS = ['爸', '爸爸', '粑粑', '拔拔', '叭叭', '霸霸'];
-const MAMA_WORDS = ['妈', '妈妈', '麻麻', '马马', '骂骂', '吗吗'];
+const COOLDOWN_MS = 1000;
 
-let failCount = 0;
-const BASE_RESTART_DELAY = 300;
-
+// 屏幕常亮
 let wakeLock = null;
 
-// 历史每日统计 (存储格式: { "YYYY-MM-DD": {baba: n, mama: n} })
-let dailyHistory = {};
+// 模型相关变量
+let recognizer = null;
+let modelLabels = null;
 
-// ---------- 本地存储管理 ----------
+// 本地存储
 const STORAGE_KEY = 'momdad_counter_data';
 
 function getTodayStr() {
@@ -179,10 +174,10 @@ function saveData() {
     dailyResetEnabled,
     dailyHistory
   };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch(e) {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) {}
 }
+
+let dailyHistory = {};
 
 function loadData() {
   try {
@@ -190,24 +185,16 @@ function loadData() {
     if (!raw) return;
     const data = JSON.parse(raw);
     const today = getTodayStr();
-    
-    // 恢复每日重置开关状态
     dailyResetEnabled = data.dailyResetEnabled || false;
-    
-    // 检查日期：如果已开启每日重置且存储的日期不是今天，则归档昨日数据并清零
     if (dailyResetEnabled && data.date && data.date !== today) {
-      // 将昨日数据保存到历史
       if (data.babaCnt > 0 || data.mamaCnt > 0) {
-        const hist = data.dailyHistory || {};
-        hist[data.date] = { baba: data.babaCnt, mama: data.mamaCnt };
-        dailyHistory = hist;
+        dailyHistory = data.dailyHistory || {};
+        dailyHistory[data.date] = { baba: data.babaCnt, mama: data.mamaCnt };
       } else {
         dailyHistory = data.dailyHistory || {};
       }
-      // 重置今天数据
       babaCnt = 0; mamaCnt = 0; logs = [];
     } else {
-      // 同一天，恢复数据
       babaCnt = data.babaCnt || 0;
       mamaCnt = data.mamaCnt || 0;
       logs = data.logs || [];
@@ -216,7 +203,7 @@ function loadData() {
   } catch(e) {}
 }
 
-// 保存当前今日数据到历史 (在重置或午夜时调用)
+// 保存今日数据到历史
 function archiveToday() {
   if (babaCnt === 0 && mamaCnt === 0) return;
   const today = getTodayStr();
@@ -249,32 +236,25 @@ function renderLog() {
   }).join('');
 }
 
-// ---------- 图表渲染 ----------
 function renderChart() {
   const container = document.getElementById('chart-bars');
-  // 获取最近7天（包括今天）
   const days = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     const val = dailyHistory[key] || { baba: 0, mama: 0 };
-    // 如果是今天，用当前内存中的数据覆盖历史数据（更实时）
     if (key === getTodayStr()) {
       val.baba = babaCnt;
       val.mama = mamaCnt;
     }
     days.push({ label: key.slice(5), baba: val.baba, mama: val.mama });
   }
-  
-  // 找出最大值，用于比例
   const maxVal = Math.max(1, ...days.map(d => d.baba + d.mama));
-  
   if (maxVal === 0) {
     container.innerHTML = '<div class="chart-empty">暂无数据</div>';
     return;
   }
-  
   let html = '';
   days.forEach(day => {
     const bHeight = (day.baba / maxVal * 100).toFixed(1);
@@ -292,179 +272,105 @@ function renderChart() {
   container.innerHTML = html;
 }
 
-// 数据变动时更新图表
 function updateAll() {
   updateUI();
   renderChart();
 }
 
-// ---------- 手动添加 ----------
 function manualAdd(word) {
   if (word === '爸爸') babaCnt++; else mamaCnt++;
   updateAll();
   addLog(word, 'manual');
 }
 
-// ---------- 自动识别到的词（带冷却期）----------
 function detected(word) {
   const now = Date.now();
   if (lastDetectTime[word] && (now - lastDetectTime[word] < COOLDOWN_MS)) return;
   lastDetectTime[word] = now;
-
   if (word.includes('爸')) babaCnt++;
   else mamaCnt++;
   updateAll();
   addLog(word, 'auto');
 }
 
-// ---------- 屏幕常亮控制 ----------
+// ---------- 屏幕常亮 ----------
 async function requestWakeLock() {
-  try {
-    if ('wakeLock' in navigator) {
-      wakeLock = await navigator.wakeLock.request('screen');
-    }
-  } catch (err) {}
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {}
 }
-
 function releaseWakeLock() {
-  if (wakeLock !== null) {
-    wakeLock.release().then(() => { wakeLock = null; });
-  }
+  if (wakeLock) { wakeLock.release().then(() => wakeLock = null); }
 }
-
 document.addEventListener('visibilitychange', () => {
-  if (running && document.visibilityState === 'visible') {
-    requestWakeLock();
-  }
+  if (running && document.visibilityState === 'visible') requestWakeLock();
 });
 
-// ---------- 语音识别核心 ----------
-function setStatus(text, state) {
-  document.getElementById('status-text').textContent = text;
-  const dot = document.getElementById('dot');
-  dot.className = 'dot' + (state ? ' ' + state : '');
+// ---------- 加载自定义模型并开始监听 ----------
+async function loadModel() {
+  setStatus('正在加载专属模型…', '');
+  try {
+    const baseURL = 'model/';
+    recognizer = await speechCommands.create('BROWSER_FFT', undefined, baseURL + 'model.json', baseURL + 'metadata.json');
+    await recognizer.ensureModelLoaded();
+    modelLabels = recognizer.wordLabels();
+    console.log('模型已加载，标签顺序：', modelLabels);
+    return true;
+  } catch (err) {
+    console.error('模型加载失败：', err);
+    setStatus('模型加载失败，请检查文件是否上传正确', 'error');
+    return false;
+  }
 }
 
 function startListening() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    setStatus('此浏览器不支持语音识别，请用 Chrome 或 Safari', 'error');
+  if (!recognizer) {
+    setStatus('模型尚未就绪，请刷新页面重试', 'error');
     return;
   }
   running = true;
   document.getElementById('btn-start').style.display = 'none';
   document.getElementById('btn-stop').style.display = '';
-  failCount = 0;
   requestWakeLock();
-  startRecog();
+  startRecognitionLoop();
 }
 
-function startRecog() {
+function startRecognitionLoop() {
   if (!running) return;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recog = new SR();
-  recog.lang = 'zh-CN';
-  recog.continuous = true;
-  recog.interimResults = true;
-  recog.maxAlternatives = 3;
+  setStatus('正在监听中…（专属模型）', 'listening');
 
-  let lastProcessed = '';
-
-  recog.onstart = () => setStatus('正在监听中…', 'listening');
-  recog.onerror = (e) => {
-    if (e.error === 'no-speech') {
-      failCount++;
-      const delay = Math.min(BASE_RESTART_DELAY * Math.pow(2, failCount), 10000);
-      if (running) setTimeout(startRecog, delay);
-      return;
-    }
-    if (e.error === 'not-allowed') {
-      setStatus('麦克风权限被拒绝，请在浏览器设置里手动开启', 'error');
-      running = false;
-      releaseWakeLock();
-      document.getElementById('btn-start').style.display = '';
-      document.getElementById('btn-stop').style.display = 'none';
-      return;
-    }
-    setStatus('识别出错: ' + e.error, 'error');
-  };
-  recog.onend = () => {
-    if (running) {
-      failCount++;
-      const delay = Math.min(BASE_RESTART_DELAY * Math.pow(2, failCount), 10000);
-      setTimeout(startRecog, delay);
-    }
-  };
-
-  recog.onresult = (e) => {
-    failCount = 0;
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const result = e.results[i];
-      const transcript = result[0].transcript;
-      if (result.isFinal) {
-        lastProcessed = '';
-        processText(transcript);
-      } else {
-        const diff = transcript.replace(lastProcessed, '');
-        if (diff && containsTargetWord(diff)) {
-          processText(diff);
-          lastProcessed = transcript;
-        }
+  recognizer.listen(result => {
+    if (!running) return;
+    let maxIdx = 0;
+    let maxScore = 0;
+    result.scores.forEach((score, idx) => {
+      if (score > maxScore) {
+        maxScore = score;
+        maxIdx = idx;
       }
-    }
-  };
+    });
 
-  try { recog.start(); } catch(e) {}
-}
-
-function containsTargetWord(text) {
-  return BABA_WORDS.some(w => text.includes(w)) || MAMA_WORDS.some(w => text.includes(w));
-}
-
-function processText(text) {
-  const chars = text.split('');
-  let i = 0;
-  while (i < chars.length) {
-    const twoChar = chars.slice(i, i+2).join('');
-    if (BABA_WORDS.includes(twoChar)) {
+    // 爸爸置信度阈值已调为 0.7
+    if (maxScore > 0.7 && modelLabels[maxIdx] === '爸爸') {
       detected('爸爸');
-      i += 2;
-      continue;
     }
-    if (MAMA_WORDS.includes(twoChar)) {
-      detected('妈妈');
-      i += 2;
-      continue;
-    }
-    const oneChar = chars[i];
-    if (BABA_WORDS.includes(oneChar)) {
-      detected('爸爸');
-      i++;
-      continue;
-    }
-    if (MAMA_WORDS.includes(oneChar)) {
-      detected('妈妈');
-      i++;
-      continue;
-    }
-    i++;
-  }
+    // 后续可以加入妈妈判断：modelLabels[maxIdx] === '妈妈'
+  }, {
+    probabilityThreshold: 0.7,
+    invokeCallbackOnNoiseAndUnknown: true,
+    overlapFactor: 0.5
+  });
 }
 
 function stopListening() {
   running = false;
-  if (recog) { try { recog.stop(); } catch(e){} recog = null; }
-  clearTimeout(restartTimer);
+  if (recognizer) recognizer.stopListening();
   releaseWakeLock();
   setStatus('已暂停', '');
   document.getElementById('btn-start').style.display = '';
   document.getElementById('btn-stop').style.display = 'none';
 }
 
-// 重置（手动重置，保留历史）
 function resetAll() {
   if (running) stopListening();
-  // 归档今日数据（如果有）
   archiveToday();
   babaCnt = 0; mamaCnt = 0; logs = [];
   updateAll();
@@ -472,7 +378,7 @@ function resetAll() {
   setStatus('已重置，点击「开始监听」重新开始', '');
 }
 
-// ---------- 每日自动重置 ----------
+// ---------- 每日重置 ----------
 function toggleDailyReset() {
   dailyResetEnabled = !dailyResetEnabled;
   const btn = document.getElementById('daily-toggle');
@@ -485,7 +391,7 @@ function toggleDailyReset() {
     btn.innerHTML = '🌙 每日重置';
     if (window._dailyResetTimer) clearTimeout(window._dailyResetTimer);
   }
-  saveData(); // 保存开关状态
+  saveData();
 }
 
 function scheduleDailyReset() {
@@ -495,17 +401,14 @@ function scheduleDailyReset() {
   midnight.setHours(24, 0, 0, 0);
   const msToMidnight = midnight - now;
   window._dailyResetTimer = setTimeout(() => {
-    // 先导出昨天记录（可选）
-    // 归档并重置
     archiveToday();
     babaCnt = 0; mamaCnt = 0; logs = [];
     updateAll();
     saveData();
-    scheduleDailyReset(); // 安排下一次
+    scheduleDailyReset();
   }, msToMidnight);
 }
 
-// ---------- 导出 CSV ----------
 function exportLog(prefix = '') {
   const filename = (prefix || '爸爸妈妈计数') + '_' + new Date().toLocaleDateString('zh-CN').replace(/\//g,'-') + '.csv';
   const lines = ['时间,词语,方式'];
@@ -519,13 +422,17 @@ function exportLog(prefix = '') {
   URL.revokeObjectURL(url);
 }
 
+function setStatus(text, state) {
+  document.getElementById('status-text').textContent = text;
+  const dot = document.getElementById('dot');
+  dot.className = 'dot' + (state ? ' ' + state : '');
+}
+
 // ---------- 初始化 ----------
-window.onload = () => {
+window.onload = async () => {
   loadData();
-  // 更新界面
   updateAll();
   renderLog();
-  // 每日重置开关状态
   const btn = document.getElementById('daily-toggle');
   if (dailyResetEnabled) {
     btn.classList.add('on');
@@ -535,7 +442,11 @@ window.onload = () => {
     btn.classList.remove('on');
     btn.innerHTML = '🌙 每日重置';
   }
-  setStatus('点击「开始监听」后自动识别', '');
+
+  const loaded = await loadModel();
+  if (loaded) {
+    setStatus('模型就绪，点击「开始监听」', '');
+  }
 };
 </script>
 </body>
