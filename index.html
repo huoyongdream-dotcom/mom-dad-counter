@@ -72,7 +72,7 @@
 <body>
 <div class="wrap">
   <h1>
-    爸爸妈妈计数器 👶
+    粑粑麻麻计数器 👶
     <span class="daily-toggle" id="daily-toggle" onclick="toggleDailyReset()">🌙 每日重置</span>
   </h1>
 
@@ -84,11 +84,11 @@
 
   <div class="counters">
     <div class="counter-card">
-      <div class="counter-label">爸爸</div>
+      <div class="counter-label">粑粑</div>
       <div class="counter-num baba" id="cnt-baba">0</div>
     </div>
     <div class="counter-card">
-      <div class="counter-label">妈妈</div>
+      <div class="counter-label">麻麻</div>
       <div class="counter-num mama" id="cnt-mama">0</div>
     </div>
   </div>
@@ -106,15 +106,15 @@
 
   <div class="section-label">手动补记（万一漏掉）</div>
   <div class="manual-btns">
-    <button class="m-baba" onclick="manualAdd('爸爸')">＋ 爸爸</button>
-    <button class="m-mama" onclick="manualAdd('妈妈')">＋ 妈妈</button>
+    <button class="m-baba" onclick="manualAdd('爸爸')">＋ 粑粑</button>
+    <button class="m-mama" onclick="manualAdd('妈妈')">＋ 麻麻</button>
   </div>
 
   <div class="chart-card">
     <div class="chart-title">📊 近7天统计</div>
     <div class="chart-legend">
-      <span><span class="legend-dot baba"></span> 爸爸</span>
-      <span><span class="legend-dot mama"></span> 妈妈</span>
+      <span><span class="legend-dot baba"></span> 粑粑</span>
+      <span><span class="legend-dot mama"></span> 麻麻</span>
     </div>
     <div class="chart-bars" id="chart-bars">
       <div class="chart-empty">暂无数据</div>
@@ -286,11 +286,10 @@ document.addEventListener('visibilitychange', () => {
   if (running && document.visibilityState === 'visible') requestWakeLock();
 });
 
-// ---------- 模型加载（修复了 URL 问题）----------
+// ---------- 模型加载 ----------
 async function loadModel() {
   setStatus('正在加载专属模型…', '');
   try {
-    // 构建绝对路径，确保 URL 以 http/https 开头
     const baseURL = window.location.origin + '/model/';
     const modelURL = baseURL + 'model.json';
     const metadataURL = baseURL + 'metadata.json';
@@ -339,12 +338,18 @@ function startRecognitionLoop() {
     const percent = (maxScore * 100).toFixed(1);
     
     const debugEl = document.getElementById('debug-info');
+    // 判断是否触发（兼容中文和拼音标签）
+    const isBaba = (label === '爸爸' || label === 'baba');
+    const isMama = (label === '妈妈' || label === 'mama');
+    const triggered = (maxScore > 0.7 && isBaba) ? '✅ 粑粑触发' : ((maxScore > 0.7 && isMama) ? '✅ 麻麻触发' : '⏸ 未触发');
+    
     if (debugEl) {
-      debugEl.textContent = `识别: ${label} (${percent}%) | 爸爸阈值0.7 | 当前${maxScore > 0.7 && label === '爸爸' ? '✅ 触发' : '⏸ 未触发'}`;
+      debugEl.textContent = `识别: ${label} (${percent}%) | 阈值0.7 | ${triggered}`;
     }
 
-    if (maxScore > 0.7 && label === '爸爸') {
-      detected('爸爸');
+    if (maxScore > 0.7) {
+      if (isBaba) detected('爸爸');
+      else if (isMama) detected('妈妈');
     }
   }, {
     probabilityThreshold: 0.0,
@@ -404,7 +409,7 @@ function scheduleDailyReset() {
 }
 
 function exportLog(prefix = '') {
-  const filename = (prefix || '爸爸妈妈计数') + '_' + new Date().toLocaleDateString('zh-CN').replace(/\//g,'-') + '.csv';
+  const filename = (prefix || '粑粑麻麻计数') + '_' + new Date().toLocaleDateString('zh-CN').replace(/\//g,'-') + '.csv';
   const lines = ['时间,词语,方式'];
   logs.forEach(l => lines.push(`${l.time},${l.word},${l.source === 'manual' ? '手动' : '自动'}`));
   const blob = new Blob(['\uFEFF' + lines.join('\n')], {type:'text/csv;charset=utf-8'});
