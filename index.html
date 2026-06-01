@@ -80,7 +80,6 @@
     <div class="dot" id="dot"></div>
     <span id="status-text">点击「开始监听」后自动识别</span>
   </div>
-  <!-- 调试信息显示区 -->
   <div class="debug-info" id="debug-info">📊 等待识别结果...</div>
 
   <div class="counters">
@@ -270,7 +269,8 @@ function detected(word) {
   const now = Date.now();
   if (lastDetectTime[word] && (now - lastDetectTime[word] < COOLDOWN_MS)) return;
   lastDetectTime[word] = now;
-  if (word.includes('爸')) babaCnt++; else mamaCnt++;
+  if (word.includes('爸')) babaCnt++;
+  else mamaCnt++;
   updateAll();
   addLog(word, 'auto');
 }
@@ -286,15 +286,19 @@ document.addEventListener('visibilitychange', () => {
   if (running && document.visibilityState === 'visible') requestWakeLock();
 });
 
-// ---------- 模型加载 ----------
+// ---------- 模型加载（修复了 URL 问题）----------
 async function loadModel() {
   setStatus('正在加载专属模型…', '');
   try {
-    const baseURL = 'model/';
-    recognizer = await speechCommands.create('BROWSER_FFT', undefined, baseURL + 'model.json', baseURL + 'metadata.json');
+    // 构建绝对路径，确保 URL 以 http/https 开头
+    const baseURL = window.location.origin + '/model/';
+    const modelURL = baseURL + 'model.json';
+    const metadataURL = baseURL + 'metadata.json';
+    
+    console.log('加载模型:', modelURL, metadataURL);
+    recognizer = await speechCommands.create('BROWSER_FFT', undefined, modelURL, metadataURL);
     await recognizer.ensureModelLoaded();
     modelLabels = recognizer.wordLabels();
-    console.log('模型标签:', modelLabels);
     document.getElementById('debug-info').textContent = '模型标签: ' + modelLabels.join(', ');
     return true;
   } catch (err) {
@@ -325,7 +329,6 @@ function startRecognitionLoop() {
   recognizer.listen(result => {
     if (!running) return;
 
-    // 找出最高分的标签和分数
     let maxIdx = 0;
     let maxScore = 0;
     result.scores.forEach((score, idx) => {
@@ -335,18 +338,16 @@ function startRecognitionLoop() {
     const label = modelLabels[maxIdx];
     const percent = (maxScore * 100).toFixed(1);
     
-    // 显示调试信息
     const debugEl = document.getElementById('debug-info');
     if (debugEl) {
       debugEl.textContent = `识别: ${label} (${percent}%) | 爸爸阈值0.7 | 当前${maxScore > 0.7 && label === '爸爸' ? '✅ 触发' : '⏸ 未触发'}`;
     }
 
-    // 正式计数
     if (maxScore > 0.7 && label === '爸爸') {
       detected('爸爸');
     }
   }, {
-    probabilityThreshold: 0.0,        // 设为0，让所有结果都触发回调，以便调试
+    probabilityThreshold: 0.0,
     invokeCallbackOnNoiseAndUnknown: true,
     overlapFactor: 0.5
   });
