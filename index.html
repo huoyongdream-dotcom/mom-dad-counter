@@ -14,11 +14,12 @@
   h1 { font-size: 18px; font-weight: 500; color: #1a1a1a; margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center; }
   .daily-toggle { font-size: 12px; color: #666; background: #fff; border: 0.5px solid #ddd; border-radius: 20px; padding: 4px 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
   .daily-toggle.on { background: #e6f1fb; color: #185FA5; border-color: #b5d4f4; }
-  .status-bar { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #666; margin-bottom: 1.5rem; }
+  .status-bar { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #666; margin-bottom: 0.5rem; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
   .dot.listening { background: #4CAF50; animation: pulse 1.2s infinite; }
   .dot.error { background: #e24b4a; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .debug-info { font-size: 11px; color: #888; margin-bottom: 1rem; padding: 6px 10px; background: #f9f9f9; border-radius: 6px; word-break: break-all; }
   .counters { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1.5rem; }
   .counter-card { background: #fff; border-radius: 12px; padding: 1.25rem; text-align: center; border: 0.5px solid #e0e0d8; }
   .counter-label { font-size: 13px; color: #888; margin-bottom: 8px; }
@@ -79,6 +80,8 @@
     <div class="dot" id="dot"></div>
     <span id="status-text">点击「开始监听」后自动识别</span>
   </div>
+  <!-- 调试信息显示区 -->
+  <div class="debug-info" id="debug-info">📊 等待识别结果...</div>
 
   <div class="counters">
     <div class="counter-card">
@@ -135,7 +138,6 @@
   </div>
 </div>
 
-<!-- 引入 TensorFlow.js 和 speech-commands -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@0.5.4/dist/speech-commands.min.js"></script>
 
@@ -146,18 +148,13 @@ let logs = [];
 let running = false;
 let dailyResetEnabled = false;
 
-// 冷却期记录（已调为 1000 毫秒）
 let lastDetectTime = {};
 const COOLDOWN_MS = 1000;
 
-// 屏幕常亮
 let wakeLock = null;
-
-// 模型相关变量
 let recognizer = null;
 let modelLabels = null;
 
-// 本地存储
 const STORAGE_KEY = 'momdad_counter_data';
 
 function getTodayStr() {
@@ -166,14 +163,7 @@ function getTodayStr() {
 }
 
 function saveData() {
-  const data = {
-    date: getTodayStr(),
-    babaCnt,
-    mamaCnt,
-    logs,
-    dailyResetEnabled,
-    dailyHistory
-  };
+  const data = { date: getTodayStr(), babaCnt, mamaCnt, logs, dailyResetEnabled, dailyHistory };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) {}
 }
 
@@ -203,7 +193,6 @@ function loadData() {
   } catch(e) {}
 }
 
-// 保存今日数据到历史
 function archiveToday() {
   if (babaCnt === 0 && mamaCnt === 0) return;
   const today = getTodayStr();
@@ -244,17 +233,11 @@ function renderChart() {
     d.setDate(d.getDate() - i);
     const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     const val = dailyHistory[key] || { baba: 0, mama: 0 };
-    if (key === getTodayStr()) {
-      val.baba = babaCnt;
-      val.mama = mamaCnt;
-    }
+    if (key === getTodayStr()) { val.baba = babaCnt; val.mama = mamaCnt; }
     days.push({ label: key.slice(5), baba: val.baba, mama: val.mama });
   }
   const maxVal = Math.max(1, ...days.map(d => d.baba + d.mama));
-  if (maxVal === 0) {
-    container.innerHTML = '<div class="chart-empty">暂无数据</div>';
-    return;
-  }
+  if (maxVal === 0) { container.innerHTML = '<div class="chart-empty">暂无数据</div>'; return; }
   let html = '';
   days.forEach(day => {
     const bHeight = (day.baba / maxVal * 100).toFixed(1);
@@ -287,8 +270,7 @@ function detected(word) {
   const now = Date.now();
   if (lastDetectTime[word] && (now - lastDetectTime[word] < COOLDOWN_MS)) return;
   lastDetectTime[word] = now;
-  if (word.includes('爸')) babaCnt++;
-  else mamaCnt++;
+  if (word.includes('爸')) babaCnt++; else mamaCnt++;
   updateAll();
   addLog(word, 'auto');
 }
@@ -304,7 +286,7 @@ document.addEventListener('visibilitychange', () => {
   if (running && document.visibilityState === 'visible') requestWakeLock();
 });
 
-// ---------- 加载自定义模型并开始监听 ----------
+// ---------- 模型加载 ----------
 async function loadModel() {
   setStatus('正在加载专属模型…', '');
   try {
@@ -312,49 +294,59 @@ async function loadModel() {
     recognizer = await speechCommands.create('BROWSER_FFT', undefined, baseURL + 'model.json', baseURL + 'metadata.json');
     await recognizer.ensureModelLoaded();
     modelLabels = recognizer.wordLabels();
-    console.log('模型已加载，标签顺序：', modelLabels);
+    console.log('模型标签:', modelLabels);
+    document.getElementById('debug-info').textContent = '模型标签: ' + modelLabels.join(', ');
     return true;
   } catch (err) {
-    console.error('模型加载失败：', err);
-    setStatus('模型加载失败，请检查文件是否上传正确', 'error');
+    console.error('加载失败:', err);
+    setStatus('模型加载失败', 'error');
+    document.getElementById('debug-info').textContent = '模型加载失败: ' + err.message;
     return false;
   }
 }
 
+// ---------- 监听与调试 ----------
 function startListening() {
   if (!recognizer) {
-    setStatus('模型尚未就绪，请刷新页面重试', 'error');
+    setStatus('模型未就绪', 'error');
     return;
   }
   running = true;
   document.getElementById('btn-start').style.display = 'none';
   document.getElementById('btn-stop').style.display = '';
   requestWakeLock();
+  setStatus('正在监听中…', 'listening');
   startRecognitionLoop();
 }
 
 function startRecognitionLoop() {
   if (!running) return;
-  setStatus('正在监听中…（专属模型）', 'listening');
 
   recognizer.listen(result => {
     if (!running) return;
+
+    // 找出最高分的标签和分数
     let maxIdx = 0;
     let maxScore = 0;
     result.scores.forEach((score, idx) => {
-      if (score > maxScore) {
-        maxScore = score;
-        maxIdx = idx;
-      }
+      if (score > maxScore) { maxScore = score; maxIdx = idx; }
     });
 
-    // 爸爸置信度阈值已调为 0.7
-    if (maxScore > 0.7 && modelLabels[maxIdx] === '爸爸') {
+    const label = modelLabels[maxIdx];
+    const percent = (maxScore * 100).toFixed(1);
+    
+    // 显示调试信息
+    const debugEl = document.getElementById('debug-info');
+    if (debugEl) {
+      debugEl.textContent = `识别: ${label} (${percent}%) | 爸爸阈值0.7 | 当前${maxScore > 0.7 && label === '爸爸' ? '✅ 触发' : '⏸ 未触发'}`;
+    }
+
+    // 正式计数
+    if (maxScore > 0.7 && label === '爸爸') {
       detected('爸爸');
     }
-    // 后续可以加入妈妈判断：modelLabels[maxIdx] === '妈妈'
   }, {
-    probabilityThreshold: 0.7,
+    probabilityThreshold: 0.0,        // 设为0，让所有结果都触发回调，以便调试
     invokeCallbackOnNoiseAndUnknown: true,
     overlapFactor: 0.5
   });
@@ -367,6 +359,7 @@ function stopListening() {
   setStatus('已暂停', '');
   document.getElementById('btn-start').style.display = '';
   document.getElementById('btn-stop').style.display = 'none';
+  document.getElementById('debug-info').textContent = '📊 等待识别结果...';
 }
 
 function resetAll() {
