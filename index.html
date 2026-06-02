@@ -308,7 +308,7 @@ async function loadModel() {
   }
 }
 
-// ---------- 监听与调试 ----------
+// ---------- 监听与调试（阈值已改为0.85）----------
 function startListening() {
   if (!recognizer) {
     setStatus('模型未就绪', 'error');
@@ -338,16 +338,15 @@ function startRecognitionLoop() {
     const percent = (maxScore * 100).toFixed(1);
     
     const debugEl = document.getElementById('debug-info');
-    // 判断是否触发（兼容中文和拼音标签）
     const isBaba = (label === '爸爸' || label === 'baba');
     const isMama = (label === '妈妈' || label === 'mama');
-    const triggered = (maxScore > 0.7 && isBaba) ? '✅ 粑粑触发' : ((maxScore > 0.7 && isMama) ? '✅ 麻麻触发' : '⏸ 未触发');
+    const triggered = (maxScore > 0.85 && isBaba) ? '✅ 粑粑触发' : ((maxScore > 0.85 && isMama) ? '✅ 麻麻触发' : '⏸ 未触发');
     
     if (debugEl) {
-      debugEl.textContent = `识别: ${label} (${percent}%) | 阈值0.7 | ${triggered}`;
+      debugEl.textContent = `识别: ${label} (${percent}%) | 阈值0.85 | ${triggered}`;
     }
 
-    if (maxScore > 0.7) {
+    if (maxScore > 0.85) {
       if (isBaba) detected('爸爸');
       else if (isMama) detected('妈妈');
     }
